@@ -1,125 +1,44 @@
-# SPECIFICATIONS:
-# Write interface which:
-# Trains classifier on original dataset
-# Performs OOSE
-# Runs classifier on OOSE points
 import numpy as np
-import numpy.typing as npt
 import sklearn as sk
+from sklearn import linear_model as linear
+from sklearn import metrics as metrics
 import torch
 from torch.utils.data import Dataset
-from torchvision import datasets as datasetsta
 from torch.utils.data import DataLoader
-
-class Classifier:
-    """
-    Classifier interface:\n
-    All classifiers passed to ClassificationTests should inherit this class\n
-    Classes implementing this interface should specify learning rate as a instance varialbe (lr: float)
-    """
-    def classify(self, inputs: torch.Tensor):
-        """
-        Params: inputs\n
-        Run the classifier model on some inputs
-        """
-        pass
-        
-    def train(self, data: npt.NDArray[Any], training_ind: npt.NDArray[np.int_]) -> None:
-        """
-        Params: data, training indices\n
-        Return: None
-        """
-        pass
-
-class GenericDataLoader:
-    def __init__(self, data: npt.NDArray[Any], labels: npt.NDArray[Any], training_ind: npt.NDArray[np.int_],
-                 batch_size: int = 4, shuffle: bool = True, num_workers: int = 0) -> None:
-        self.data = data[training_ind]
-        self.labels = labels[training_ind]
-        self.training_ind = training_ind
-        self.batch_size = batch_size
-        self.shuffle = shuffle
-        self.num_workers = num_workers
-        self.__dataset()
-
-    def get_data(self) -> npt.NDArray[Any]:
-        return self.data
-    
-    def __dataset(self) -> None:
-        self.dataset = self.GenericDataset(self.data, self.labels)
-
-    def dataset(self):
-        return self.dataset
-    
-    def dataloader(self):
-        return DataLoader(self.dataset, batch_size=self.batch_size, 
-                          shuffle=self.shuffle, num_workers=self.num_workers)
-        
-    class GenericDataset(Dataset):
-        def __init__(self, data: npt.NDArray[Any], labels: npt.NDArray[Any], transform=None):
-            self.data = data
-            self.labels = labels
-            self.transform = transform
-
-        def __getitem__(self, index):
-            return self.data[index], self.labels[index]
-        
-        def __len__(self) -> int:
-            return len(self.labels)
-        
-class NN(torch.nn.Module):
-    def __init__(self):
-        super.__init__()
-        self.layer1 = torch.nn.Linear(120, 64)
-        self.layer2 = torch.nn.Linear(64, 32)
-    
-    def forward(self, x):
-        x = torch.nn.functional.relu(self.layer1(x))
-        x = torch.nn.functional.relu(self.layer2(x))
-        return x
-    
-class NNClassifier(Classifier):
-    def __init__(self):
-        self.net = NN()
-        self.lr = 0.1
-
-#     def classify(self, inputs: torch.Tensor):
-#         self.net(inputs)
-    
-#     def train(self, data: Dataset, training_ind: npt.NDArray[np.int_]) -> None:
-#         mse = torch.nn.MSELoss()
-#         # define inputs and labels from datasets\
-
-#         # define train loop
-
-#         optimizer = torch.optim.SGD(self.net.parameters(), lr=self.lr)
-        
-#         optimizer.zero_grad()
-
-#         outputs = self.net(inputs)
-
-#         loss = mse(outputs, labels)
-
-#         loss.backward()
-
-#         optimizer.step()
+import manifoldlearning
 
 class ClassificationTests:
-    def __init__(self, data: npt.NDArray[Any], training_ind: npt.NDArray[np.int_], classifier: Classifier) -> None:
-        self.classifier = classifier
-        self.data = data
-        self.training_ind = training_ind
-        self.classifier.train(self.data, self.training_ind)
+    '''
+    Current architecture stinks, here's the TODO:
+    1. Generate G, W, L, G_L and W_L per class
+    2. Feed G_L and W_L into manifoldlearning.embed and into OOSE
+    3. This will ensure we don't have different embeddings (possible reason for 5% performance)
+    4. Sort of optional: Cayley transform implementation for OOSE (faster?)
+    '''
+    def __init__(self, samples, labels,  m: int, n: int, classifier: str = "hinge") -> None:
+        self.samples = samples
+        self.labels = labels
+        self.m = m
+        self.n = n
+        self.label_ind = np.random.choice(n, m, replace=False)
+        self.unlabel_ind = np.ones(samples.shape[0], dtype=bool)
+        self.unlabel_ind[self.label_ind] = False
+        self.classifier = linear.SGDClassifier(loss=classifier)
 
-    # def __get_samples(self, ind: npt.NDArray[np.int_]) -> npt.NDArray[Any]:
-    #     return np.ndarray([self.data.__getitem_(i) for i in ind])
+    def __train(self) -> None:
+        (evs, eigs) = manifoldlearning.manifoldlearning.embed(self.samples[self.label_ind])
+        self.classifier.fit(X=eigs,y=self.labels[self.label_ind])
 
-    def compare(self) -> float:
-        # perform OOSE, store classification in list
-        # samples = self.__get_samples(self.training_ind)
-        pred = None # Will be classify(OOSE)
-        pred_true = self.classifier.classify(self.data)
-
+    def mse(self) -> float:
+        self.__train()
+        #label_embeddings = manifoldlearning.manifoldlearning.embed(self.samples[self.unlabel_ind])
+        o = manifoldlearning.OOSE(self.samples, self.label_ind)
+        (OOSE_embeddings, *d_tests) = o.embed()
+        #return self.classifier.score(OOSE_embeddings, label_embeddings)
+        #OOSE_embeddings = np.array(OOSE_embeddings[:,1])
+        #print(OOSE_embeddings)
+        #return self.classifier.score(self.samples[self.unlabel_ind], OOSE_embeddings);
+        return self.classifier.score(X=OOSE_embeddings, y=self.labels[self.unlabel_ind])
 
 
     
