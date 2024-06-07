@@ -14,21 +14,45 @@ import manifoldlearning
 # Use MSE
 
 class RegressionTests:
-    def __init__(self, samples: npt.NDArray[Any], m: int, n: int, ) -> None:
+    def __init__(self, samples, labels,  m: int, n: int) -> None:
         self.samples = samples
+        self.labels = labels
         self.m = m
         self.n = n
-        self.unlabel_ind = np.random.choice(n, m, replace=False)
-        self.label_ind = np.ones(samples.shape[0], dtype=bool)
-        self.label_ind[self.unlabel_ind] = False
-        self.regressionmodel = linear.Ridge()
+        self.label_ind = np.random.choice(n, m, replace=False)
+        self.unlabel_ind = np.ones(samples.shape[0], dtype=bool)
+        self.unlabel_ind[self.label_ind] = False
+        self.regressor = linear.Ridge()
+        self.trained = False
 
-    def __train(self) -> None:
-        embeddings = manifoldlearning.embed(self.samples[self.unlabel_ind])
-        # self.classifier.fit(X=self.samples, Y=embeddings)
+    def __generate_graphs(self):
+        self.W, self.G, self.L = manifoldlearning.manifoldlearning.generate_knn(self.samples)
+        self.G_l, self.L_l = manifoldlearning.manifoldlearning.partition_knn(self.G, self.label_ind)
 
-    def mse(self) -> float:
-        self.__train()
+    def __train_helper(self) -> None:
+        (ev, eigs) = manifoldlearning.manifoldlearning.embed(G=self.G_l)
+        self.regressor.fit(X=eigs, y=self.labels[self.label_ind])
+
+    def train(self) -> None:
+        self.__generate_graphs()
+        self.__train_helper()
+        self.trained = True
+
+    def ground_accuracy(self):
+        if not self.trained:
+            return Exception("Call train() first")
+        (ev, eigs) = manifoldlearning.manifoldlearning.embed(G=self.G_l)
+        return self.regressor.score(X=eigs, y=self.labels[self.label_ind])
+
+    def OOSE_accuracy(self) -> float:
+        if not self.trained:
+            return Exception("Call train() first")
+        o = manifoldlearning.OOSE(self.samples, self.label_ind)
+        (OOSE_embeddings, *d_tests) = o.embed(W=self.W, G=self.G, L=self.L, G_l=self.G_l, L_l=self.L_l)
+        score = self.regressor.score(X=OOSE_embeddings, y=self.labels[self.unlabel_ind])
+        predict = self.regressor.predict(X=OOSE_embeddings)
+        return score, predict
+        
         # label_embeddings = OOSE.embed(self.samples[self.unlabel_ind])
         # OOSE_embeddings = OOSE(self.samples[self.unlabel_ind])
         # return self.classifier.score(OOSE_embeddings, label_embeddings)

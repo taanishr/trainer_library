@@ -78,7 +78,7 @@ class OOSE:
         self.data = data
         self.label_ind = label_ind
 
-    def init(self, r: int = 10, c0: int = 2., W = None, G = None, L = None):
+    def init(self, r: int = 10, c0: int = 2., W = None, G = None, L = None, G_l = None, L_l = None):
         '''
         ones vectors, useful for later calculation
         '''
@@ -94,10 +94,11 @@ class OOSE:
         '''
         Generate knn and labeled subgraph
         '''
-        if W = None or G = None or L = None:
+        if W == None or G == None or L == None:
             W, G, L = manifoldlearning.generate_knn(self.data)
 
-        G_l, L_l = manifoldlearning.partition_knn(G, self.label_ind)
+        if G_l == None or L_l == None:
+            G_l, L_l = manifoldlearning.partition_knn(G, self.label_ind)
 
         '''
         Perform eigenvector decomposition over labeled subgraph 
@@ -176,25 +177,36 @@ class OOSE:
         self.Xk = Xk
         return self.Xk, FKs, FOCs, lmaxs
     
-    def embed(self, r: int = 10, c0: int = 2., beta: float = 0.9, start: int = 0, stop: int = 100, num: int = 40):
-        self.init(r, c0)
-        return self.optim(beta, start, stop, num)
+    def embed(self, r: int = 10, c0: int = 2., beta: float = 0.9, start: int = 0, stop: int = 100, num: int = 40, W = None, G = None, L = None, G_l=None, L_l=None):
+        self.init(r, c0, W=W, G=G, L=L)
+        (self.OOSE_embeddings, *dtests) = self.optim(beta, start, stop, num) 
+        return self.X0, self.OOSE_embeddings, dtests 
 
 class manifoldlearning:
     @staticmethod
-    def embed(X: npt.NDArray[Any], r: int=10):
+    def embed(X: npt.NDArray[Any] = None, G: gl.graph = None, r: int=10):
         # convert to LOBPCG methods later
-        W, G, L = manifoldlearning.generate_knn(X)
+        if X == None and G == None:
+            raise Exception("No data or graph provided")
+        if X != None and G != None:
+            raise Exception("Both data and graph provided")
+        if G == None:
+            W, G, L = manifoldlearning.generate_knn(X)
         ev, eigs = G.eigen_decomp(k=r)
         ev = ev[1:r]
         eigs = eigs[:,1:r]
         return ev, eigs
 
-    def embed(G: gl.graph, r: int=10):
-        ev, eigs = G.eigen_decomp(k=r)
-        ev = ev[1:r]
-        eigs = eigs[1:,1:r]
-        return ev, eigs
+    # lower nn's to like 30 and do two seperate knns
+    # calculate degree between labeleld and unlabelled
+    # calculate first half block seperately
+    # top right and bottom left are the same blocks
+
+    #def embed(G: gl.graph, r: int=10):
+    #    ev, eigs = G.eigen_decomp(k=r)
+    #    ev = ev[1:r]
+    #    eigs = eigs[1:,1:r]
+    #    return ev, eigs
     
     @staticmethod
     def generate_knn(data, n_neighbors: int = 100, bandwidth: int = 0.2, kernel: str='symgaussian', normalization: str='combinatorial'):
@@ -207,6 +219,8 @@ class manifoldlearning:
     def partition_knn(G, ind, normalization: str='combinatorial'):
         g_partition = G.subgraph(ind=ind)
         l_partition = g_partition.laplacian(normalization=normalization)
+        if g_partition.isconnected() == False:
+            raise Exception("Graph is not connected")
         return g_partition, l_partition
 
 
