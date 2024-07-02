@@ -1,6 +1,8 @@
 # Code for OOSE library
 # Makes code more reuseable, easier to deal with
 
+# TODO: cayley transform + cuda
+
 '''
 directives
 '''
@@ -19,6 +21,8 @@ from typing import Any
 import scipy
 
 import optim as optim
+
+import pyamg
 
 class nystrom:
     def __init__(self, data, label_ind):
@@ -78,7 +82,7 @@ class OOSE:
         self.data = data
         self.label_ind = label_ind
 
-    def init(self, r: int = 10, c0: int = 2., W = None, G = None, L = None, G_l = None, L_l = None):
+    def init(self, r: int = 10, c0: int = 2., W = None, L = None, vecs = None, vals = None):
         '''
         ones vectors, useful for later calculation
         '''
@@ -94,17 +98,20 @@ class OOSE:
         '''
         Generate knn and labeled subgraph
         '''
-        if W == None or G == None or L == None:
+        if W is None or L is None or vecs is None or vals is None:
+            # W, L, vecs or vals not found. Generating new embeddings
             W, G, L = manifoldlearning.generate_knn(self.data)
-
-        if G_l == None or L_l == None:
             G_l, L_l = manifoldlearning.partition_knn(G, self.label_ind)
+            vals, vecs = G_l.eigen_decomp(k=r)
+
+        #if G_l == None or L_l == None:
+        #    G_l, L_l = manifoldlearning.partition_knn(G, self.label_ind)
 
         '''
         Perform eigenvector decomposition over labeled subgraph 
         and sort eigenvectors/eigenvalues
         '''
-        vals, vecs = G_l.eigen_decomp(k=r)
+        #vals, vecs = G_l.eigen_decomp(k=r)
         s_ind = np.argsort(vals)
         vals[s_ind]
         vecs = np.array(vecs[:,s_ind])
@@ -131,7 +138,8 @@ class OOSE:
         # a function call over an array
         v = jnp.expand_dims(jnp.ones(self.m2),1)
         o = 1/jnp.sqrt(self.n)*v
-        #o = 1/jnp.sqrt(self.n)*om2
+        #v = np.expand_dims(np.ones(self.m2),1)
+        #o = 1/np.sqrt(self.n)*om2
         P = lambda x : x - o@(o.T@x)
         self.A = lambda x : P(L_22@P(x))
 
@@ -143,6 +151,7 @@ class OOSE:
         Randomly initializes approximation eigenvectors,
         then uses LOBPCG to solve generalized eigenproblem (which starts with approximation)
         '''
+        
         A_ = scipy.sparse.linalg.LinearOperator(L_22.shape, self.A)
         X = np.random.randn(self.B.shape[0], r) # randomly initialized approximation for eigenvectors
         l, Vg = scipy.sparse.linalg.lobpcg(A_, X, M=None, tol=1e-8, largest=False,
@@ -171,14 +180,14 @@ class OOSE:
     '''
     def optim(self, beta: float = 0.9, start: int = 0, stop: int = 100, num: int = 40):
         step_sizes = 1*np.power(beta,np.linspace(start,stop,num=num))
-        step_sizes = np.append(step_sizes,0)
+        #step_sizes = np.append(step_sizes,0)
         step_sizes=np.array(step_sizes)
         Xk, FKs, FOCs, lmaxs = optim.optim.optim(self.X0, self.A, self.B, self.C, step_sizes=step_sizes)
         self.Xk = Xk
         return self.Xk, FKs, FOCs, lmaxs
     
-    def embed(self, r: int = 10, c0: int = 2., beta: float = 0.9, start: int = 0, stop: int = 100, num: int = 40, W = None, G = None, L = None, G_l=None, L_l=None):
-        self.init(r, c0, W=W, G=G, L=L)
+    def embed(self, r: int = 10, c0: int = 2., beta: float = 0.9, start: int = 0, stop: int = 100, num: int = 40, W = None, L = None, vecs=None, vals=None):
+        self.init(r, c0, W=W, L=L, vecs=vecs, vals=vals)
         (self.OOSE_embeddings, *dtests) = self.optim(beta, start, stop, num) 
         return self.X0, self.OOSE_embeddings, dtests 
 
@@ -193,8 +202,13 @@ class manifoldlearning:
         if G == None:
             W, G, L = manifoldlearning.generate_knn(X)
         ev, eigs = G.eigen_decomp(k=r)
-        ev = ev[1:r]
-        eigs = eigs[:,1:r]
+        #D = G.degree_matrix(p=-0.5)
+        #A = D*G.weight_matrix()*D
+        #ev, eigs =  scipy.sparse.linalg.lobpcg(A_, X, M=None, tol=1e-8, largest=False,
+        #                                    verbosityLevel=0,
+        #                                    maxiter=1000) # solve generalized eigenproblem
+        #ev = ev[1:r]
+        #eigs = eigs[:,1:r]
         return ev, eigs
 
     # lower nn's to like 30 and do two seperate knns

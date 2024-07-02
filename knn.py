@@ -6,6 +6,10 @@
 # generate the knns
 # calculate overlap
 
+
+# visualize 
+# neighborhood distribution based on class (embedding and data space)
+# neighborhood size
 import sklearn as sk
 import torch
 import manifoldlearning
@@ -59,7 +63,7 @@ class KNNTests:
         mean_score = 0
 
         n1 = np.linalg.norm(orig_knn_i-oose_knn_i)
-        print(n1)
+        #print(n1)
 
         for i, (x,y) in enumerate(zip(orig_knn_i, oose_knn_i)):
             '''
@@ -78,3 +82,4 @@ class KNNTests:
 
   
  # TODO: vary eigenvectors
+ # Try to find way to plot them

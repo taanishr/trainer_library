@@ -17,59 +17,44 @@ class ClassificationTests:
     3. This will ensure we don't have different embeddings (possible reason for 5% performance)
     4. Sort of optional: Cayley transform implementation for OOSE (faster?)
     '''
-    def __init__(self, samples, labels,  m: int, n: int, classifier: str = "hinge") -> None:
+    def __init__(self, samples, labels, m: int, n: int, classifier: str = "hinge", r: int = 10) -> None:
         self.samples = samples
         self.labels = labels
         self.m = m
         self.n = n
+        self.r = r
         self.label_ind = np.random.choice(n, m, replace=False)
         self.unlabel_ind = np.ones(samples.shape[0], dtype=bool)
         self.unlabel_ind[self.label_ind] = False
-        #self.classifier = linear.SGDClassifier(loss=classifier)
         self.classifier = svm.LinearSVC(C=15)
         self.trained = False
 
-    def __generate_graphs(self):
-        self.W, self.G, self.L = manifoldlearning.manifoldlearning.generate_knn(self.samples)
+    def __generate_graphs(self, nn):
+        self.W, self.G, self.L = manifoldlearning.manifoldlearning.generate_knn(self.samples, n_neighbors=nn)
         self.G_l, self.L_l = manifoldlearning.manifoldlearning.partition_knn(self.G, self.label_ind)
     
     def __train_helper(self) -> None:
-        #(evs, eigs) = manifoldlearning.manifoldlearning.embed(self.samples[self.label_ind])
-        (ev, self.eigs) = manifoldlearning.manifoldlearning.embed(G=self.G_l) # save training points
-        self.classifier.fit(X=self.eigs,y=self.labels[self.label_ind])
+        (self.ev, self.eigs) = manifoldlearning.manifoldlearning.embed(r=self.r,G=self.G_l) # save training points
+        self.classifier.fit(X=self.eigs[:,1:self.r],y=self.labels[self.label_ind])
 
-    def train(self):
-        self.__generate_graphs()
+    def train(self, nn: int = 100):
+        self.__generate_graphs(nn)
         self.__train_helper()
         self.trained = True
 
     def ground_accuracy(self):
-        #self.W, self.G, self.L = manifoldlearning.manifoldlearning.generate_knn(self.samples)
-        #self.G_l, self.L_l = manifoldlearning.manifoldlearning.partition_knn(self.G, self.label_ind)
-        #self.__train()
         if not self.trained:
             return Exception("Call train() first")
-        (ev, eigs) = manifoldlearning.manifoldlearning.embed(G=self.G_l)
-        return self.classifier.score(X=eigs, y=self.labels[self.label_ind])
+        return self.classifier.score(X=self.eigs[:,1:self.r], y=self.labels[self.label_ind])
 
     def OOSE_accuracy(self) -> float:
-        #self.W, self.G, self.L = manifoldlearning.manifoldlearning.generate_knn(self.samples)
-        #self.G_l, self.L_l = manifoldlearning.manifoldlearning.partition_knn(self.G, self.label_ind)
-        #self.__train()
-        #label_embeddings = manifoldlearning.manifoldlearning.embed(self.samples[self.unlabel_ind])
         if not self.trained:
             return Exception("Call train() first")
         o = manifoldlearning.OOSE(self.samples, self.label_ind)
-        (self.X0, self.OOSE_embeddings, d_tests) = o.embed(W=self.W, G=self.G, L=self.L, G_l=self.G_l, L_l=self.L_l)
-        print(self.X0)
-        print(self.OOSE_embeddings)
-        #return self.classifier.score(OOSE_embeddings, label_embeddings)
-        #OOSE_embeddings = np.array(OOSE_embeddings[:,1])
-        #print(OOSE_embeddings)
-        #return self.classifier.score(self.samples[self.unlabel_ind], OOSE_embeddings);
-        score = self.classifier.score(X=self.OOSE_embeddings, y=self.labels[self.unlabel_ind])
+        (self.X0, self.OOSE_embeddings, d_tests) = o.embed(r=self.r, W=self.W, L=self.L, vecs=self.eigs, vals=self.ev)
+        self.score = self.classifier.score(X=self.OOSE_embeddings, y=self.labels[self.unlabel_ind])
         self.predict = self.classifier.predict(X=self.OOSE_embeddings)
-        return score, self.predict
+        return self.score, self.predict
 
    
     # plots a row
@@ -89,6 +74,6 @@ class ClassificationTests:
             self.visualize_preds_helper(Xk_sorted[:,subplot[0]], Xk_sorted[:,subplot[1]], Xk_sorted[:,subplot[2]], color=y_pred_sorted)
 
     def visualize_pts(self):
-        #plt.scatter(self.OOSE_embeddings[:, 0], self.OOSE_embeddings[:, 1],  c='black')
-        plt.scatter(self.eigs[:, 0], self.eigs[:,1],  c='red')
+        # Plotting first and second eigenvectors in 2D. We ignore the 0 eigenvector here.
+        plt.scatter(self.eigs[:, 1], self.eigs[:,2],  c='red')
         plt.scatter(self.X0[:, 0], self.X0[:,1], c='blue')
