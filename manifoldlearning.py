@@ -125,8 +125,8 @@ class OOSE:
         '''
         Store unlabeled laplacian (L_22 in block form)
         '''
-        L_22 = L[ul_ind][:,ul_ind]
-        L_22 = jsparse.BCOO.from_scipy_sparse(L_22)
+        L_22_s = L[ul_ind][:,ul_ind]
+        L_22 = jsparse.BCOO.from_scipy_sparse(L_22_s)
 
         '''
         Projection onto set of mean-zero vectors 
@@ -136,10 +136,15 @@ class OOSE:
         # this is to facilitate gradient descent in optim.py
         # optim.py unfortunately uses vmap, which efficiently batches
         # a function call over an array
+        v_s = np.expand_dims(np.ones(self.m2),1)
+        o_s = 1/np.sqrt(self.n*v_s)
         v = jnp.expand_dims(jnp.ones(self.m2),1)
         o = 1/jnp.sqrt(self.n)*v
         #v = np.expand_dims(np.ones(self.m2),1)
         #o = 1/np.sqrt(self.n)*om2
+        P_s = lambda x : x - o_s@(o_s.T@x)
+        self.A_s = lambda x : P_s(L_22_s@P_s(x))
+        
         P = lambda x : x - o@(o.T@x)
         self.A = lambda x : P(L_22@P(x))
 
@@ -152,7 +157,7 @@ class OOSE:
         then uses LOBPCG to solve generalized eigenproblem (which starts with approximation)
         '''
         
-        A_ = scipy.sparse.linalg.LinearOperator(L_22.shape, self.A)
+        A_ = scipy.sparse.linalg.LinearOperator(L_22.shape, self.A_s)
         X = np.random.randn(self.B.shape[0], r) # randomly initialized approximation for eigenvectors
         l, Vg = scipy.sparse.linalg.lobpcg(A_, X, M=None, tol=1e-8, largest=False,
                                         verbosityLevel=0,
@@ -194,19 +199,14 @@ class OOSE:
 class manifoldlearning:
     @staticmethod
     def embed(X: npt.NDArray[Any] = None, G: gl.graph = None, r: int=10):
-        # convert to LOBPCG methods later
-        if X == None and G == None:
+        if X is None and G is None:
             raise Exception("No data or graph provided")
-        if X != None and G != None:
+        if X is not None and G is not None:
             raise Exception("Both data and graph provided")
-        if G == None:
+        if G is None:
             W, G, L = manifoldlearning.generate_knn(X)
+
         ev, eigs = G.eigen_decomp(k=r)
-        #D = G.degree_matrix(p=-0.5)
-        #A = D*G.weight_matrix()*D
-        #ev, eigs =  scipy.sparse.linalg.lobpcg(A_, X, M=None, tol=1e-8, largest=False,
-        #                                    verbosityLevel=0,
-        #                                    maxiter=1000) # solve generalized eigenproblem
         #ev = ev[1:r]
         #eigs = eigs[:,1:r]
         return ev, eigs
@@ -230,12 +230,68 @@ class manifoldlearning:
         return W, G, L
     
     @staticmethod
+    def connect_graph(G):
+        '''
+        Connect a graph by connecting each node not in the largest connected component
+        to the closet node in largest connected component
+        '''
+
+        connections = []
+
+        # get LCC and non_LCC indices
+        (lcc, lcc_ind) = G.largest_connected_component()
+        non_lcc_ind = np.setdiff1d(np.arange(G.weight_matrix.shape[0]), lcc_ind)
+
+        # find shortest distances
+        for node in non_lcc_ind:
+            (shortest_dist, lcc_node) = G.dijkstra(lcc_ind, node, return_cp=True)
+            best_connection = (node, lcc_node[0], shortest_dist[0]) 
+            connections.append(best_connection)
+            # shortest_dist = float('inf')
+            # best_connection = None
+
+            # for lcc_node in lcc_ind:
+            #     dist = G.distance(node, lcc_node)
+            #     if dist < shortest_dist:
+            #         shortest_dist = dist
+            #         best_connection = (node, lcc_node, shortest_dist)
+                
+            # if (best_connection):
+            #     connections.append(best_connection)
+
+        '''
+            update weight matrix
+            assume symgaussian weight calculation
+        '''
+        for connection in connections:
+            G.weight_matrix[connection[0], connection[1]] = connection[2]
+            
+
+
+
+    
+    @staticmethod
     def partition_knn(G, ind, normalization: str='combinatorial'):
         g_partition = G.subgraph(ind=ind)
+        # if not g_partition.isconnected():
+        #     raise Exception("Graph is not connected")
+        while not g_partition.isconnected():
+            manifoldlearning.connect_graph(g_partition)
         l_partition = g_partition.laplacian(normalization=normalization)
-        if g_partition.isconnected() == False:
-            raise Exception("Graph is not connected")
         return g_partition, l_partition
+    
+    @staticmethod
+    def create_subknn(partition, n_neighbors, bandwidth: int = 0.2, kernel: str='symguassian', normalization: str='combinatorial'):
+        _, g_partition, l_partition = manifoldlearning.generate_knn(data=partition, n_neighbors=n_neighbors, bandwidth=bandwidth, )
+        # l_partition = g_partition.laplacian(normalization=normalization)
+        return g_partition, l_partition
+
+
+    # @staticmethod
+    # def create_subknn(partition, n_neighbors, bandwidth: int = 0.2, kernel: str='symgaussian' normalization: str='combinatorial'):
+    #     g_partition = generate_knn(data=partition, n_neighbors=n_neighbors, bandwidth=bandwidth, )
+    #     l_partition = g_partition.laplacian(normalization=normalization)
+    #     return g_partition, l_partition
 
 
     @staticmethod
